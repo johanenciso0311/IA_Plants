@@ -116,43 +116,42 @@ class _HomePageState extends State<HomePage> {
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
       ),
-      body: SingleChildScrollView(
+      body: ScrollConfiguration(
+        // ScrollBehavior extendido para que el scroll funcione con mouse en Windows/Web
+        behavior: ScrollConfiguration.of(context).copyWith(scrollbars: true),
+        child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(24),
         child: Column(
           children: [
             // ── Previsualización de imagen ──────────────────────────────────
-            // LayoutBuilder da el ancho disponible real del contenedor padre.
-            // Así la imagen siempre ocupa el 100% del ancho y mantiene
-            // proporción 4:3, adaptándose a cualquier tamaño de ventana.
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final double alto = constraints.maxWidth * 3 / 4;
-                return Container(
-                  width: double.infinity,
-                  height: alto,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF162a1e),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: const Color(0xFF1e4030)),
-                  ),
-                  child: _imagen == null
-                      ? const Center(
-                          child: Text(
-                            '📷 Selecciona una foto de planta',
-                            style: TextStyle(color: Colors.white54),
-                          ),
-                        )
-                      : ClipRRect(
-                          borderRadius: BorderRadius.circular(16),
-                          child: Image.file(
-                            _imagen!,
-                            width: double.infinity,
-                            height: double.infinity,
-                            fit: BoxFit.contain, // muestra la imagen completa sin recortar
-                          ),
-                        ),
-                );
-              },
+            // Usamos MediaQuery para obtener el alto de la pantalla y limitar
+            // el contenedor al 45% de ella. Así siempre hay espacio para hacer
+            // scroll y ver los botones y resultados sin que la imagen lo tape.
+            Container(
+              width: double.infinity,
+              height: MediaQuery.of(context).size.height * 0.45,
+              decoration: BoxDecoration(
+                color: const Color(0xFF162a1e),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: const Color(0xFF1e4030)),
+              ),
+              child: _imagen == null
+                  ? const Center(
+                      child: Text(
+                        '📷 Selecciona una foto de planta',
+                        style: TextStyle(color: Colors.white54),
+                      ),
+                    )
+                  : ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: Image.file(
+                        _imagen!,
+                        width: double.infinity,
+                        height: double.infinity,
+                        fit: BoxFit.contain,
+                      ),
+                    ),
             ),
 
             const SizedBox(height: 20),
@@ -306,6 +305,7 @@ class _HomePageState extends State<HomePage> {
               ),
           ],
         ),
+      ),
       ),
     );
   }
