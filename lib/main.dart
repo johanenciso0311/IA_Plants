@@ -1,9 +1,12 @@
-import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:tflite_flutter/tflite_flutter.dart';
-import 'package:image/image.dart' as img;
-import 'package:flutter/services.dart';
+import 'dart:convert';
 import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
+
+// URL base del backend ASP.NET Core
+const String _backendUrl = 'http://localhost:5000/api/predict';
 
 void main() => runApp(const RobotJardineroApp());
 
@@ -36,33 +39,34 @@ class _HomePageState extends State<HomePage> {
   String _resultado = '';
   String _confianza = '';
   bool _cargando = false;
-  bool _modeloListo = false;
-  Interpreter? _interpreter;
-  List<String> _clases = [];
+  bool _backendListo = false;
+  String _errorConexion = '';
 
   @override
   void initState() {
     super.initState();
-    _cargarModelo();
+    _verificarBackend();
   }
 
-  Future<void> _cargarModelo() async {
+  /// Comprueba que el backend esté disponible antes de habilitar los botones.
+  Future<void> _verificarBackend() async {
     try {
-      _interpreter = await Interpreter.fromAsset(
-        'assets/modelo_plantas.tflite',
-      );
-      final txt = await rootBundle.loadString('assets/clases.txt');
-      _clases = txt.trim().split('\n');
-      setState(() => _modeloListo = true);
-      print('✓ Modelo cargado — ${_clases.length} clases');
-    } catch (e) {
-      print('❌ Error cargando modelo: $e');
+      final res = await http
+          .get(Uri.parse('http://localhost:5000/api/predict/health'))
+          .timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200) {
+        setState(() => _backendListo = true);
+      } else {
+        setState(() => _errorConexion = 'Backend respondió con error ${res.statusCode}');
+      }
+    } catch (_) {
+      setState(() => _errorConexion = 'No se pudo conectar al backend.\nAsegúrate de que esté corriendo.');
     }
   }
 
   Future<void> _seleccionarFoto(ImageSource fuente) async {
     final picker = ImagePicker();
-    final foto = await picker.pickImage(source: fuente);
+    final foto = await picker.pickImage(source: fuente, imageQuality: 85);
     if (foto == null) return;
 
     setState(() {
@@ -75,62 +79,30 @@ class _HomePageState extends State<HomePage> {
     await _analizarFoto(File(foto.path));
   }
 
+  /// Envía la imagen al backend y muestra el resultado.
   Future<void> _analizarFoto(File archivo) async {
-    if (!_modeloListo || _interpreter == null) {
-      setState(() {
-        _resultado = 'Modelo aún cargando, espera un momento';
-        _cargando = false;
-      });
-      return;
-    }
+    try {
+      final request = http.MultipartRequest('POST', Uri.parse(_backendUrl));
+      request.files.add(await http.MultipartFile.fromPath('imagen', archivo.path));
 
-    final bytes = await archivo.readAsBytes();
-    final original = img.decodeImage(bytes)!;
-    final redimensionada = img.copyResize(
-      original,
-      width: 224,
-      height: 224,
-    );
+      final streamed = await request.send().timeout(const Duration(seconds: 30));
+      final res = await http.Response.fromStream(streamed);
 
-    final input = List.generate(
-      1,
-      (_) => List.generate(
-        224,
-        (y) => List.generate(224, (x) {
-          final pixel = redimensionada.getPixel(x, y);
-          return [
-            pixel.r / 255.0,
-            pixel.g / 255.0,
-            pixel.b / 255.0,
-          ];
-        }),
-      ),
-    );
-
-    final output = List.filled(
-      _clases.length,
-      0.0,
-    ).reshape([1, _clases.length]);
-
-    _interpreter!.run(input, output);
-
-    final probabilidades = List<double>.from(output[0]);
-    double maxProb = 0;
-    int maxIdx = 0;
-    for (int i = 0; i < probabilidades.length; i++) {
-      if (probabilidades[i] > maxProb) {
-        maxProb = probabilidades[i];
-        maxIdx = i;
+      if (res.statusCode == 200) {
+        final json = jsonDecode(res.body) as Map<String, dynamic>;
+        setState(() {
+          _resultado = json['clase'] as String;
+          _confianza = '${json['confianza']}%';
+        });
+      } else {
+        final json = jsonDecode(res.body) as Map<String, dynamic>;
+        setState(() => _resultado = 'Error: ${json['error']}');
       }
+    } catch (e) {
+      setState(() => _resultado = 'Error de conexión: $e');
+    } finally {
+      setState(() => _cargando = false);
     }
-
-    setState(() {
-      _resultado = _clases[maxIdx]
-          .replaceAll('___', ' — ')
-          .replaceAll('_', ' ');
-      _confianza = '${(maxProb * 100).toStringAsFixed(1)}%';
-      _cargando = false;
-    });
   }
 
   @override
@@ -141,17 +113,14 @@ class _HomePageState extends State<HomePage> {
         backgroundColor: const Color(0xFF112019),
         title: const Text(
           '🌱 Robot Jardinero',
-          style: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-          ),
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Column(
           children: [
-            // Imagen seleccionada
+            // ── Previsualización de imagen ──────────────────────────────────
             Container(
               width: double.infinity,
               height: 280,
@@ -175,12 +144,12 @@ class _HomePageState extends State<HomePage> {
 
             const SizedBox(height: 20),
 
-            // Botones
+            // ── Botones cámara / galería ────────────────────────────────────
             Row(
               children: [
                 Expanded(
                   child: ElevatedButton.icon(
-                    onPressed: _modeloListo
+                    onPressed: _backendListo
                         ? () => _seleccionarFoto(ImageSource.camera)
                         : null,
                     icon: const Icon(Icons.camera_alt),
@@ -198,7 +167,7 @@ class _HomePageState extends State<HomePage> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: ElevatedButton.icon(
-                    onPressed: _modeloListo
+                    onPressed: _backendListo
                         ? () => _seleccionarFoto(ImageSource.gallery)
                         : null,
                     icon: const Icon(Icons.photo_library),
@@ -218,28 +187,61 @@ class _HomePageState extends State<HomePage> {
 
             const SizedBox(height: 24),
 
-            // Estado del modelo
-            if (!_modeloListo)
-              const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Color(0xFF2ECC71),
+            // ── Estado del backend ──────────────────────────────────────────
+            if (!_backendListo)
+              _errorConexion.isEmpty
+                  ? const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Color(0xFF2ECC71),
+                          ),
+                        ),
+                        SizedBox(width: 10),
+                        Text(
+                          'Conectando con el backend...',
+                          style: TextStyle(color: Colors.white54, fontSize: 13),
+                        ),
+                      ],
+                    )
+                  : Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF2a1010),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.redAccent.withOpacity(0.4)),
+                      ),
+                      child: Column(
+                        children: [
+                          Text(
+                            _errorConexion,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(color: Colors.redAccent, fontSize: 13),
+                          ),
+                          const SizedBox(height: 10),
+                          ElevatedButton(
+                            onPressed: () {
+                              setState(() {
+                                _backendListo = false;
+                                _errorConexion = '';
+                              });
+                              _verificarBackend();
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF2ECC71),
+                              foregroundColor: Colors.black,
+                            ),
+                            child: const Text('Reintentar conexión'),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  SizedBox(width: 10),
-                  Text(
-                    'Cargando modelo...',
-                    style: TextStyle(color: Colors.white54, fontSize: 13),
-                  ),
-                ],
-              ),
 
-            // Resultado
+            // ── Resultado ──────────────────────────────────────────────────
             if (_cargando)
               const CircularProgressIndicator(color: Color(0xFF2ECC71))
             else if (_resultado.isNotEmpty)
