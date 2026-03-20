@@ -121,25 +121,38 @@ class _HomePageState extends State<HomePage> {
         child: Column(
           children: [
             // ── Previsualización de imagen ──────────────────────────────────
-            Container(
-              width: double.infinity,
-              height: 280,
-              decoration: BoxDecoration(
-                color: const Color(0xFF162a1e),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFF1e4030)),
-              ),
-              child: _imagen == null
-                  ? const Center(
-                      child: Text(
-                        '📷 Selecciona una foto de planta',
-                        style: TextStyle(color: Colors.white54),
-                      ),
-                    )
-                  : ClipRRect(
-                      borderRadius: BorderRadius.circular(16),
-                      child: Image.file(_imagen!, fit: BoxFit.cover),
-                    ),
+            // LayoutBuilder da el ancho disponible real del contenedor padre.
+            // Así la imagen siempre ocupa el 100% del ancho y mantiene
+            // proporción 4:3, adaptándose a cualquier tamaño de ventana.
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final double alto = constraints.maxWidth * 3 / 4;
+                return Container(
+                  width: double.infinity,
+                  height: alto,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF162a1e),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFF1e4030)),
+                  ),
+                  child: _imagen == null
+                      ? const Center(
+                          child: Text(
+                            '📷 Selecciona una foto de planta',
+                            style: TextStyle(color: Colors.white54),
+                          ),
+                        )
+                      : ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: Image.file(
+                            _imagen!,
+                            width: double.infinity,
+                            height: double.infinity,
+                            fit: BoxFit.contain, // muestra la imagen completa sin recortar
+                          ),
+                        ),
+                );
+              },
             ),
 
             const SizedBox(height: 20),
